@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { toast } from 'react-hot-toast';
+import { submitSupportRequest } from '../lib/supabase';
 
 const SupportPage = () => {
   const [name, setName] = useState('');
@@ -13,6 +14,18 @@ const SupportPage = () => {
     setIsSubmitting(true);
 
     try {
+      // Try Supabase first
+      const supaResult = await submitSupportRequest(name, email, message);
+      
+      if (supaResult.success) {
+        toast.success('Message sent successfully (Supabase)!');
+        setName('');
+        setEmail('');
+        setMessage('');
+        return;
+      }
+
+      // Fallback to local API if Supabase is not configured or fails
       const response = await fetch('/api/support', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '../store';
-import { supabase } from '../lib/supabase';
+import { supabase, checkSupabaseConnection } from '../lib/supabase';
+import { Database, Info } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 const LoginPage = () => {
   const [isLogin, setIsLogin] = useState(true);
@@ -10,22 +12,35 @@ const LoginPage = () => {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
+  const [useLocalOnly, setUseLocalOnly] = useState(false);
   const { setUser } = useAuthStore();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    checkSupabaseConnection().then(setSupabaseConnected);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
 
     try {
-      // Try Supabase first if configured
-      const hasSupabase = import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_ANON_KEY;
-      
-      if (hasSupabase) {
+      // Use the exported configuration check
+      if (supabaseConnected && !useLocalOnly) {
+        console.log('Attempting Supabase Authentication...');
         try {
           if (isLogin) {
             const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-            if (!error && data.user) {
+            if (error) {
+              // If it's a "real" auth error from Supabase (wrong password, etc), show it
+              if (error.message.includes('Invalid login credentials')) {
+                // We still try local fallback for the demo admin or legacy users
+                console.log('Supabase login failed (invalid credentials), trying local fallback...');
+              } else {
+                throw error;
+              }
+            } else if (data.user) {
               const role = data.user.email === 'admin@ybt.com' ? 'admin' : 'user';
               setUser({
                 id: data.user.id,
@@ -33,28 +48,76 @@ const LoginPage = () => {
                 name: data.user.user_metadata.name || data.user.email!.split('@')[0],
                 role: role
               }, (data.session as any)?.access_token);
-              toast.success('Welcome back (Supabase)!');
+              toast.success('Logged in via Supabase');
               navigate(role === 'admin' ? '/admin' : '/profile');
               return;
             }
           } else {
+            console.log('Registering user with Supabase...');
             const { data, error } = await supabase.auth.signUp({
               email,
               password,
-              options: { data: { name } }
+              options: { 
+                data: { name },
+                emailRedirectTo: window.location.origin
+              }
             });
-            if (!error && data.user) {
-              toast.success('Registration successful! Please login.');
-              setIsLogin(true);
+            
+            if (error) {
+              if (error.message.includes('User already registered')) {
+                toast.error('This email is already registered in Supabase.');
+                setIsLoading(false);
+                return;
+              }
+              throw error;
+            }
+            
+            if (data.user) {
+              if (data.session) {
+                // Logged in immediately (email confirmation disabled)
+                setUser({
+                  id: data.user.id,
+                  email: data.user.email!,
+                  name: name || data.user.email!.split('@')[0],
+                  role: 'user'
+                }, data.session.access_token);
+                toast.success('Account created and logged in (Supabase)!');
+                navigate('/profile');
+              } else {
+                // Email confirmation required
+                toast.success('Registration successful! Please check your email for a confirmation link.');
+                setIsLogin(true);
+              }
+              setIsLoading(false);
               return;
             }
           }
-        } catch (supaErr) {
-          console.warn('Supabase auth failed, falling back to local:', supaErr);
+        } catch (supaErr: any) {
+          console.error('Supabase Auth Error:', supaErr.message);
+          
+          if (supaErr.message.includes('rate limit exceeded')) {
+            // Informational toast instead of error toast
+            toast('Supabase rate limit hit. Falling back to local database...', { icon: 'ℹ️' });
+            console.log('Rate limit hit, falling back to local auth...');
+          } else if (supaErr.message.includes('Email not confirmed')) {
+            toast.error('Email not confirmed. Please check your inbox for a verification link or disable email confirmation in Supabase settings.', {
+              duration: 6000,
+            });
+            setIsLoading(false);
+            return; // Stop here, don't fall back to local if the user exists in Supabase but isn't confirmed
+          } else if (supaErr.message.includes('apiKey') || supaErr.message.includes('url')) {
+            toast.error('Supabase configuration error. Please check your keys.');
+            setIsLoading(false);
+            return;
+          } else {
+            // For other errors like "Invalid credentials", we just log it and fall back
+            console.log('Supabase auth failed, trying local fallback...');
+          }
         }
       }
 
-      // Local API Fallback
+      // Local API Fallback (only if Supabase is not connected or login failed)
+      console.log('Attempting Local Authentication...');
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
       const body = isLogin ? { email, password } : { name, email, password };
 
@@ -77,7 +140,17 @@ const LoginPage = () => {
       }
     } catch (err: any) {
       console.error('Auth error:', err);
-      toast.error(err.message || 'Authentication failed');
+      let errorMessage = err.message || 'Authentication failed';
+      
+      if (isLogin) {
+        if (email === 'admin@ybt.com' && errorMessage.includes('Invalid credentials')) {
+          errorMessage = 'Invalid credentials for admin. Use the "Reset" button below to restore the default password (admin123).';
+        } else if (errorMessage.includes('Invalid credentials')) {
+          errorMessage = 'Invalid email or password. If you recently switched to Supabase, you may need to create a new account there.';
+        }
+      }
+      
+      toast.error(errorMessage, { duration: 5000 });
     } finally {
       setIsLoading(false);
     }
@@ -87,8 +160,37 @@ const LoginPage = () => {
     <div className="pt-32 pb-32 px-6 flex items-center justify-center min-h-screen">
       <div className="w-full max-w-md bg-white dark:bg-zinc-900 p-10 rounded-[3rem] border border-zinc-100 dark:border-zinc-800 shadow-2xl">
         <h1 className="text-3xl font-bold mb-2 text-center">{isLogin ? 'Welcome Back' : 'Create Account'}</h1>
-        <p className="text-zinc-500 text-center mb-10">{isLogin ? 'Enter your details to access your account' : 'Join our community of tech enthusiasts'}</p>
+        <p className="text-zinc-500 text-center mb-6">{isLogin ? 'Enter your details to access your account' : 'Join our community of tech enthusiasts'}</p>
         
+        {supabaseConnected === true && (
+          <div className="mb-8 p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <Database className="w-5 h-5 text-emerald-600" />
+              <p className="text-[10px] font-medium text-emerald-700">
+                Supabase Cloud Auth is active.
+              </p>
+            </div>
+            <button 
+              onClick={() => setUseLocalOnly(!useLocalOnly)}
+              className={cn(
+                "px-3 py-1 rounded-lg text-[8px] font-bold uppercase tracking-wider transition-colors",
+                useLocalOnly ? "bg-emerald-600 text-white" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200"
+              )}
+            >
+              {useLocalOnly ? "Using Local" : "Use Local"}
+            </button>
+          </div>
+        )}
+
+        {supabaseConnected === false && (
+          <div className="mb-8 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-2xl flex items-center gap-3">
+            <Database className="w-5 h-5 text-yellow-600" />
+            <p className="text-xs font-medium text-yellow-700">
+              Supabase is not connected. Using local database fallback.
+            </p>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
             <input 
@@ -150,6 +252,48 @@ const LoginPage = () => {
         >
           {isLogin ? "Don't have an account? Sign up" : "Already have an account? Login"}
         </button>
+
+        {isLogin && (
+          <div className="mt-8 p-4 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-100 dark:border-zinc-800">
+            <p className="text-[10px] uppercase tracking-widest font-black text-zinc-400 mb-2">Demo Admin Access</p>
+            <div className="flex items-center justify-between text-xs mb-3">
+              <span className="text-zinc-500">Email: <span className="text-zinc-900 dark:text-white font-mono">admin@ybt.com</span></span>
+              <span className="text-zinc-500">Pass: <span className="text-zinc-900 dark:text-white font-mono">admin123</span></span>
+            </div>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => {
+                  setEmail('admin@ybt.com');
+                  setPassword('admin123');
+                }}
+                className="flex-1 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Auto-fill
+              </button>
+              <button 
+                onClick={async () => {
+                  try {
+                    const res = await fetch('/api/auth/reset-admin', { method: 'POST' });
+                    const data = await res.json();
+                    if (data.success) {
+                      toast.success('Admin user reset successfully!');
+                      setEmail('admin@ybt.com');
+                      setPassword('admin123');
+                    } else {
+                      toast.error(data.error || 'Reset failed');
+                    }
+                  } catch (err) {
+                    toast.error('Failed to reset admin');
+                  }
+                }}
+                className="px-4 py-2 bg-red-500/10 text-red-600 border border-red-500/20 rounded-xl text-[10px] font-bold uppercase tracking-wider hover:bg-red-500/20 transition-colors"
+                title="Force Reset Admin in Database"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

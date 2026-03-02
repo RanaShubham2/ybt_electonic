@@ -1,5 +1,5 @@
 import sqlite3 from 'better-sqlite3';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcryptjs';
 import { SEED_PRODUCTS } from './seedData';
 
 const db = new sqlite3('database.sqlite');
@@ -65,16 +65,21 @@ try {
 
 // Seed initial data
 try {
-  const adminExists = db.prepare('SELECT * FROM users WHERE role = ?').get('admin');
-  if (!adminExists) {
+  const adminEmail = 'admin@ybt.com';
+  const adminUser = db.prepare('SELECT * FROM users WHERE email = ?').get(adminEmail) as any;
+  
+  if (!adminUser) {
     console.log('Seeding admin user...');
     const hashedPassword = bcrypt.hashSync('admin123', 10);
     db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run(
       'Admin User',
-      'admin@ybt.com',
+      adminEmail,
       hashedPassword,
       'admin'
     );
+  } else if (adminUser.role !== 'admin') {
+    console.log('Updating user to admin role...');
+    db.prepare('UPDATE users SET role = ? WHERE email = ?').run('admin', adminEmail);
   }
 
   const productCount = db.prepare('SELECT COUNT(*) as count FROM products').get() as { count: number };

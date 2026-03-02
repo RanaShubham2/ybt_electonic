@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Package, ShoppingCart, User, ChevronRight, Star, Plus } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingCart, User, ChevronRight, Star, Plus, Database, AlertCircle, ExternalLink, RefreshCw } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '../store';
 import { cn } from '../lib/utils';
+import { checkSupabaseConnection, testSupabaseRead } from '../lib/supabase';
 
 const AdminDashboard = () => {
   const { user, token } = useAuthStore();
@@ -12,6 +13,21 @@ const AdminDashboard = () => {
   const [products, setProducts] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean | null>(null);
+  const [isTesting, setIsTesting] = useState(false);
+
+  const handleTestConnection = async () => {
+    setIsTesting(true);
+    const result = await testSupabaseRead();
+    if (result.success) {
+      toast.success(result.message);
+      setSupabaseConnected(true);
+    } else {
+      toast.error(result.message);
+      setSupabaseConnected(false);
+    }
+    setIsTesting(false);
+  };
 
   useEffect(() => {
     if (!user || user.role !== 'admin') {
@@ -21,26 +37,44 @@ const AdminDashboard = () => {
 
     const fetchAdminData = async () => {
       try {
-        const [statsRes, productsRes, ordersRes] = await Promise.all([
+        const [statsRes, productsRes, ordersRes, supaStatus] = await Promise.allSettled([
           fetch('/api/admin/stats', { headers: { 'Authorization': `Bearer ${token}` } }),
           fetch('/api/products'),
-          fetch('/api/orders', { headers: { 'Authorization': `Bearer ${token}` } })
+          fetch('/api/orders', { headers: { 'Authorization': `Bearer ${token}` } }),
+          checkSupabaseConnection()
         ]);
 
-        if (!statsRes.ok || !productsRes.ok || !ordersRes.ok) throw new Error('Failed to fetch admin data');
+        const statsResult = statsRes.status === 'fulfilled' ? statsRes.value : null;
+        const productsResult = productsRes.status === 'fulfilled' ? productsRes.value : null;
+        const ordersResult = ordersRes.status === 'fulfilled' ? ordersRes.value : null;
+        const supaStatusResult = supaStatus.status === 'fulfilled' ? supaStatus.value : false;
 
-        const [statsData, productsData, ordersData] = await Promise.all([
-          statsRes.json(),
-          productsRes.json(),
-          ordersRes.json()
-        ]);
+        setSupabaseConnected(supaStatusResult);
 
-        setStats(statsData);
-        setProducts(productsData);
-        setOrders(ordersData);
+        if (statsResult && statsResult.ok) {
+          setStats(await statsResult.json());
+        } else {
+          console.warn('Stats fetch failed');
+        }
+
+        if (productsResult && productsResult.ok) {
+          setProducts(await productsResult.json());
+        } else {
+          console.warn('Products fetch failed');
+        }
+
+        if (ordersResult && ordersResult.ok) {
+          setOrders(await ordersResult.json());
+        } else {
+          console.warn('Orders fetch failed');
+        }
+
+        if ((statsResult && !statsResult.ok) || (productsResult && !productsResult.ok) || (ordersResult && !ordersResult.ok)) {
+            throw new Error('Some data failed to load');
+        }
       } catch (err) {
         console.error('Error fetching admin data:', err);
-        toast.error('Failed to load admin dashboard');
+        toast.error('Failed to load some admin data');
       } finally {
         setLoading(false);
       }
@@ -54,13 +88,75 @@ const AdminDashboard = () => {
   return (
     <div className="pt-24 pb-32 px-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-12">
-        <h1 className="text-4xl font-bold flex items-center gap-4">
-          <LayoutDashboard className="w-10 h-10 text-emerald-500" /> Admin Dashboard
-        </h1>
+        <div className="flex flex-col gap-2">
+          <h1 className="text-4xl font-bold flex items-center gap-4">
+            <LayoutDashboard className="w-10 h-10 text-emerald-500" /> Admin Dashboard
+          </h1>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Database className={cn("w-4 h-4", supabaseConnected ? "text-emerald-500" : "text-red-500")} />
+              <span className={cn("text-xs font-bold uppercase tracking-widest", supabaseConnected ? "text-emerald-500" : "text-red-500")}>
+                Supabase (Auth & Support): {supabaseConnected === null ? 'Checking...' : (supabaseConnected ? 'Connected' : 'Disconnected')}
+              </span>
+            </div>
+            <button 
+              onClick={handleTestConnection}
+              disabled={isTesting}
+              className="text-[10px] font-bold uppercase tracking-widest text-zinc-400 hover:text-emerald-500 flex items-center gap-1 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={cn("w-3 h-3", isTesting && "animate-spin")} /> Test Connection
+            </button>
+          </div>
+        </div>
         <button className="bg-emerald-600 text-white px-6 py-3 rounded-2xl font-bold flex items-center gap-2 hover:scale-105 transition-transform">
           <Plus className="w-5 h-5" /> Add Product
         </button>
       </div>
+
+      {supabaseConnected === false && (
+        <div className="mb-12 p-8 bg-zinc-50 dark:bg-zinc-800/50 rounded-[2.5rem] border border-zinc-100 dark:border-zinc-800">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 bg-red-500/10 text-red-500 rounded-2xl flex items-center justify-center shrink-0">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-xl font-bold mb-2">Supabase Connection Required</h3>
+              <p className="text-zinc-500 dark:text-zinc-400 mb-6 max-w-2xl">
+                Your application is currently running in "Local Fallback" mode. To enable real-time features, OAuth, and cloud storage, you must connect your Supabase project.
+              </p>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+                  <p className="text-[10px] uppercase font-black text-zinc-400 mb-2">Step 1</p>
+                  <p className="text-sm font-bold mb-1">Create Project</p>
+                  <a href="https://supabase.com" target="_blank" rel="noopener noreferrer" className="text-xs text-emerald-500 hover:underline flex items-center gap-1">
+                    supabase.com <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+                <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+                  <p className="text-[10px] uppercase font-black text-zinc-400 mb-2">Step 2</p>
+                  <p className="text-sm font-bold mb-1">Get API Keys</p>
+                  <p className="text-xs text-zinc-500">Settings &gt; API &gt; URL &amp; Anon Key</p>
+                </div>
+                <div className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-100 dark:border-zinc-800 shadow-sm">
+                  <p className="text-[10px] uppercase font-black text-zinc-400 mb-2">Step 3</p>
+                  <p className="text-sm font-bold mb-1">Set Env Vars</p>
+                  <p className="text-xs text-zinc-500">Update VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY</p>
+                </div>
+              </div>
+
+              <div className="p-4 bg-blue-500/5 border border-blue-500/10 rounded-2xl">
+                <p className="text-xs font-bold text-blue-600 mb-1 flex items-center gap-2">
+                  <RefreshCw className="w-3 h-3" /> Troubleshooting: Email Rate Limit
+                </p>
+                <p className="text-[10px] text-blue-500 leading-relaxed">
+                  If you see "email rate limit exceeded", go to your Supabase Dashboard &gt; Authentication &gt; Rate Limits and increase the "Email Rate Limit" (default is 3 per hour).
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="text-center py-20">Loading dashboard...</div>

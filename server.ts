@@ -1,7 +1,7 @@
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcryptjs';
+import * as bcrypt from 'bcryptjs';
 import db from './src/db.ts';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -16,6 +16,10 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+
+  app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  });
 
   // --- Auth Middleware ---
   const authenticateToken = (req: any, res: any, next: any) => {
@@ -80,40 +84,83 @@ async function startServer() {
   // Auth
   app.post('/api/auth/signup', async (req, res) => {
     const { name, email, password } = req.body;
+    const normalizedEmail = email?.trim().toLowerCase();
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
-      const role = email === 'admin@ybt.com' ? 'admin' : 'user';
-      const result = db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run(name, email, hashedPassword, role);
-      const user = { id: result.lastInsertRowid, name, email, role };
+      const role = normalizedEmail === 'admin@ybt.com' ? 'admin' : 'user';
+      const result = db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run(name, normalizedEmail, hashedPassword, role);
+      const user = { id: result.lastInsertRowid, name, email: normalizedEmail, role };
       const token = jwt.sign(user, JWT_SECRET);
       res.json({ user, token });
     } catch (error: any) {
-      res.status(400).json({ error: error.message.includes('UNIQUE') ? 'Email already exists' : 'Signup failed' });
+      if (error.message.includes('UNIQUE')) {
+        res.status(400).json({ error: 'This email is already registered in our local system. Please try logging in instead.' });
+      } else {
+        res.status(400).json({ error: 'Signup failed' });
+      }
     }
   });
 
   app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
-    console.log(`Login attempt for: ${email}`);
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+    const trimmedEmail = email?.trim().toLowerCase();
+    console.log(`Login attempt for: ${trimmedEmail}`);
     try {
-      const user = db.prepare('SELECT * FROM users WHERE email = ?').get(email) as any;
+      const user = db.prepare('SELECT * FROM users WHERE email = ?').get(trimmedEmail) as any;
       if (!user) {
-        console.log(`User not found: ${email}`);
+        console.log(`User not found: ${trimmedEmail}`);
         return res.status(401).json({ error: 'Invalid credentials' });
       }
       
+      console.log(`User found: ${user.email}, role: ${user.role}`);
       const isMatch = await bcrypt.compare(password, user.password);
       if (!isMatch) {
-        console.log(`Password mismatch for: ${email}`);
+        console.log(`Password mismatch for: ${trimmedEmail}`);
+        // Special check for admin if it fails
+        if (trimmedEmail === 'admin@ybt.com' && password === 'admin123') {
+          console.log('CRITICAL: admin123 failed to match hash in DB!');
+        }
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
+      console.log(`Login successful for: ${trimmedEmail}`);
       const { password: _, ...userWithoutPassword } = user;
       const token = jwt.sign(userWithoutPassword, JWT_SECRET);
       res.json({ user: userWithoutPassword, token });
     } catch (error: any) {
       console.error('Login error:', error);
       res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  app.get('/api/test-bcrypt', async (req, res) => {
+    const password = 'admin123';
+    const hash = await bcrypt.hash(password, 10);
+    const match = await bcrypt.compare(password, hash);
+    res.json({ password, hash, match });
+  });
+
+  app.post('/api/auth/reset-admin', async (req, res) => {
+    try {
+      const adminEmail = 'admin@ybt.com';
+      const hashedPassword = await bcrypt.hash('admin123', 10);
+      
+      // Delete if exists to ensure clean state
+      db.prepare('DELETE FROM users WHERE email = ?').run(adminEmail);
+      
+      db.prepare('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)').run(
+        'Admin User',
+        adminEmail,
+        hashedPassword,
+        'admin'
+      );
+      
+      res.json({ success: true, message: 'Admin user has been reset to default credentials.' });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
     }
   });
 
@@ -234,6 +281,11 @@ async function startServer() {
       ORDER BY o.created_at DESC
     `).all();
     res.json(orders);
+  });
+
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error('Express Error Handler:', err);
+    res.status(500).json({ error: 'Internal server error', message: err.message });
   });
 
   // Vite middleware for development
