@@ -18,7 +18,7 @@ const SupportPage = () => {
       const supaResult = await submitSupportRequest(name, email, message);
       
       if (supaResult.success) {
-        toast.success('Message sent successfully (Supabase)!');
+        toast.success('Message sent successfully!');
         setName('');
         setEmail('');
         setMessage('');

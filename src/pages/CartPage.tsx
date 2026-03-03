@@ -23,7 +23,7 @@ const CartPage = () => {
       const supaResult = await createOrder(String(user.id), total, items);
       
       if (supaResult.success) {
-        toast.success('Order placed successfully (Supabase)!');
+        toast.success('Order placed successfully!');
         clearCart();
         navigate('/profile');
         return;

@@ -3,12 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-export const isSupabaseConfigured = supabaseUrl.startsWith('http') && supabaseAnonKey.length > 0;
+export const isSupabaseConfigured = supabaseUrl.startsWith('http') && 
+                               supabaseAnonKey.length > 0 && 
+                               !supabaseUrl.includes('placeholder') &&
+                               !supabaseAnonKey.includes('placeholder');
 const isProduction = import.meta.env.PROD;
 
 if (!isSupabaseConfigured) {
   if (isProduction) {
-    console.error('Supabase is NOT configured in production! App will not function correctly.');
+    console.error('CRITICAL: Supabase is NOT configured in production! Please set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your Netlify environment variables.');
   } else {
     console.warn('Supabase is not fully configured. Authentication and Support Form will use local fallback.');
   }

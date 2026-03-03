@@ -74,11 +74,6 @@ const Navbar = memo(() => {
         
         {user ? (
           <div className="flex items-center gap-4">
-            {user.role === 'admin' && (
-              <Link to="/admin" className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
-                <LayoutDashboard className="w-5 h-5" />
-              </Link>
-            )}
             <Link to="/profile" className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-full transition-colors">
               <User className="w-5 h-5" />
             </Link>
@@ -183,7 +178,6 @@ export default function App() {
               <Route path="/cart" element={<CartPage />} />
               <Route path="/login" element={<LoginPage />} />
               <Route path="/profile" element={<ProfilePage />} />
-              <Route path="/admin" element={<AdminDashboard />} />
               <Route path="/wishlist" element={<WishlistPage />} />
               <Route path="/support" element={<SupportPage />} />
               <Route path="*" element={<Navigate to="/" />} />

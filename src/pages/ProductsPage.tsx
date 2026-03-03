@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Search, Heart, Star, ChevronRight, ShoppingCart } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'react-hot-toast';
@@ -37,15 +37,23 @@ const Skeleton = ({ className }: { className?: string }) => (
 );
 
 const ProductsPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [products, setProducts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState(searchParams.get('category') || 'All');
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 8;
   const { addItem } = useCartStore();
   const { user } = useAuthStore();
   const { items: wishlistItems, toggleItem } = useWishlistStore();
+
+  useEffect(() => {
+    const categoryFromUrl = searchParams.get('category');
+    if (categoryFromUrl) {
+      setSelectedCategory(categoryFromUrl);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     const fetchProductsData = async () => {
