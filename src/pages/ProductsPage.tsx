@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { toast } from 'react-hot-toast';
 import { useAuthStore, useCartStore, useWishlistStore } from '../store';
 import { cn } from '../lib/utils';
+import { getProducts } from '../lib/supabase';
 
 const optimizeImage = (url: string, width = 600, quality = 75) => {
   if (!url) return 'https://images.unsplash.com/photo-1560393464-5c69a73c5770?auto=format&fit=crop&w=600&q=75';
@@ -47,21 +48,29 @@ const ProductsPage = () => {
   const { items: wishlistItems, toggleItem } = useWishlistStore();
 
   useEffect(() => {
-    const fetchProducts = async () => {
+    const fetchProductsData = async () => {
       setLoading(true);
       try {
-        const response = await fetch('/api/products');
-        if (!response.ok) throw new Error('Failed to fetch products');
-        const data = await response.json();
-        setProducts(data || []);
-      } catch (err) {
+        const result = await getProducts();
+        if (result.success) {
+          setProducts(result.data || []);
+        } else if (result.fallback) {
+          // Fallback to API if Supabase is not configured
+          const response = await fetch('/api/products');
+          if (!response.ok) throw new Error('Failed to fetch products');
+          const data = await response.json();
+          setProducts(data || []);
+        } else {
+          throw new Error(result.error);
+        }
+      } catch (err: any) {
         console.error('Error fetching products:', err);
-        toast.error('Failed to load products');
+        toast.error('Failed to load products: ' + err.message);
       } finally {
         setLoading(false);
       }
     };
-    fetchProducts();
+    fetchProductsData();
   }, []);
 
   const handleToggleWishlist = async (productId: number) => {

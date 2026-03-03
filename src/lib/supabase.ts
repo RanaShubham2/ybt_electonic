@@ -4,9 +4,14 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const isSupabaseConfigured = supabaseUrl.startsWith('http') && supabaseAnonKey.length > 0;
+const isProduction = import.meta.env.PROD;
 
 if (!isSupabaseConfigured) {
-  console.warn('Supabase is not fully configured. Authentication and Support Form will use local fallback.');
+  if (isProduction) {
+    console.error('Supabase is NOT configured in production! App will not function correctly.');
+  } else {
+    console.warn('Supabase is not fully configured. Authentication and Support Form will use local fallback.');
+  }
 }
 
 export const supabase = createClient(
@@ -48,7 +53,7 @@ export const testSupabaseRead = async () => {
 };
 
 export const submitSupportRequest = async (name: string, email: string, message: string) => {
-  if (!isSupabaseConfigured) return { fallback: true };
+  if (!isSupabaseConfigured) return { fallback: !isProduction };
   
   try {
     const { error } = await supabase
@@ -59,6 +64,117 @@ export const submitSupportRequest = async (name: string, email: string, message:
     return { success: true };
   } catch (e: any) {
     console.error('Supabase support submission failed:', e.message);
+    return { success: false, error: e.message };
+  }
+};
+
+// --- Product Management ---
+export const getProducts = async () => {
+  if (!isSupabaseConfigured) return { fallback: !isProduction, data: [] };
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('status', 'active');
+    
+    if (error) {
+      // If table not found, fall back to local in dev
+      if (error.message.includes('not found') || error.code === 'PGRST116') {
+        console.warn('Supabase products table not found, falling back to local data...');
+        return { fallback: !isProduction, data: [] };
+      }
+      throw error;
+    }
+    return { success: true, data };
+  } catch (e: any) {
+    console.error('Supabase getProducts failed:', e.message);
+    return { success: false, error: e.message, data: [], fallback: !isProduction };
+  }
+};
+
+export const getProductById = async (id: string) => {
+  if (!isSupabaseConfigured) return { fallback: !isProduction };
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error) {
+      if (error.message.includes('not found') || error.code === 'PGRST116') {
+        return { fallback: !isProduction };
+      }
+      throw error;
+    }
+    return { success: true, data };
+  } catch (e: any) {
+    console.error('Supabase getProductById failed:', e.message);
+    return { success: false, error: e.message, fallback: !isProduction };
+  }
+};
+
+// --- Order Management ---
+export const createOrder = async (userId: string, totalAmount: number, items: any[]) => {
+  if (!isSupabaseConfigured) return { fallback: !isProduction };
+  try {
+    // 1. Create the order
+    const { data: order, error: orderError } = await supabase
+      .from('orders')
+      .insert([{ user_id: userId, total_amount: totalAmount, status: 'pending' }])
+      .select()
+      .single();
+
+    if (orderError) throw orderError;
+
+    // 2. Create order items
+    const orderItems = items.map(item => ({
+      order_id: order.id,
+      product_id: item.id,
+      quantity: item.quantity || 1,
+      price: item.price
+    }));
+
+    const { error: itemsError } = await supabase
+      .from('order_items')
+      .insert(orderItems);
+
+    if (itemsError) throw itemsError;
+
+    return { success: true, orderId: order.id };
+  } catch (e: any) {
+    console.error('Supabase createOrder failed:', e.message);
+    return { success: false, error: e.message };
+  }
+};
+
+// --- Admin Stats ---
+export const getAdminStats = async () => {
+  if (!isSupabaseConfigured) return { fallback: !isProduction };
+  try {
+    const [
+      { count: totalOrders },
+      { count: totalProducts },
+      { data: ordersData }
+    ] = await Promise.all([
+      supabase.from('orders').select('*', { count: 'exact', head: true }),
+      supabase.from('products').select('*', { count: 'exact', head: true }),
+      supabase.from('orders').select('total_amount')
+    ]);
+
+    const totalRevenue = ordersData?.reduce((sum, order) => sum + (order.total_amount || 0), 0) || 0;
+
+    return {
+      success: true,
+      data: {
+        totalOrders: totalOrders || 0,
+        totalProducts: totalProducts || 0,
+        totalUsers: 0, // Supabase doesn't allow counting users easily from client
+        totalRevenue
+      }
+    };
+  } catch (e: any) {
+    console.error('Supabase getAdminStats failed:', e.message);
     return { success: false, error: e.message };
   }
 };

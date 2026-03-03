@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight, Star } from 'lucide-react';
 import { motion } from 'motion/react';
+import { getProducts } from '../lib/supabase';
 
 const optimizeImage = (url: string, width = 600, quality = 75) => {
   if (!url) return 'https://images.unsplash.com/photo-1560393464-5c69a73c5770?auto=format&fit=crop&w=600&q=75';
@@ -13,6 +14,26 @@ const optimizeImage = (url: string, width = 600, quality = 75) => {
 };
 
 const HomePage = () => {
+  const [featuredProducts, setFeaturedProducts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchFeatured = async () => {
+      const result = await getProducts();
+      if (result.success && result.data) {
+        setFeaturedProducts(result.data.slice(0, 3));
+      } else {
+        // Fallback to static if Supabase is not ready
+        setFeaturedProducts([
+          { id: 1, title: 'MacBook Pro 16" M3 Max', price: 3499, category: 'Laptops', image_url: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=800&q=80' },
+          { id: 2, title: 'iPhone 15 Pro Titanium', price: 999, category: 'Smartphones', image_url: 'https://images.unsplash.com/photo-1592890288564-76628a30a657?auto=format&fit=crop&w=800&q=80' },
+          { id: 3, title: 'Sony WH-1000XM5', price: 398, category: 'Audio', image_url: 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&w=800&q=80' }
+        ]);
+      }
+      setLoading(false);
+    };
+    fetchFeatured();
+  }, []);
   return (
     <div className="pt-20 md:pt-0">
       {/* Hero Section */}
@@ -74,11 +95,7 @@ const HomePage = () => {
         </div>
         
         <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-          {[
-            { id: 1, title: 'MacBook Pro 16" M3 Max', price: 3499, category: 'Laptops', img: 'https://images.unsplash.com/photo-1517336714731-489689fd1ca8?auto=format&fit=crop&w=800&q=80' },
-            { id: 2, title: 'iPhone 15 Pro Titanium', price: 999, category: 'Smartphones', img: 'https://images.unsplash.com/photo-1592890288564-76628a30a657?auto=format&fit=crop&w=800&q=80' },
-            { id: 3, title: 'Sony WH-1000XM5', price: 398, category: 'Audio', img: 'https://images.unsplash.com/photo-1546435770-a3e426bf472b?auto=format&fit=crop&w=800&q=80' }
-          ].map((prod) => (
+          {featuredProducts.map((prod) => (
             <motion.div 
               key={prod.id}
               whileHover={{ y: -12 }}
@@ -86,7 +103,7 @@ const HomePage = () => {
             >
               <div className="aspect-video relative overflow-hidden">
                 <img 
-                  src={optimizeImage(prod.img, 800, 75)} 
+                  src={optimizeImage(prod.image_url || prod.img, 800, 75)} 
                   alt={prod.title} 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                   referrerPolicy="no-referrer"

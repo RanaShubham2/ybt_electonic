@@ -4,7 +4,7 @@ import { LayoutDashboard, Package, ShoppingCart, User, ChevronRight, Star, Plus,
 import { toast } from 'react-hot-toast';
 import { useAuthStore } from '../store';
 import { cn } from '../lib/utils';
-import { checkSupabaseConnection, testSupabaseRead } from '../lib/supabase';
+import { checkSupabaseConnection, testSupabaseRead, getAdminStats, supabase } from '../lib/supabase';
 
 const AdminDashboard = () => {
   const { user, token } = useAuthStore();
@@ -37,19 +37,33 @@ const AdminDashboard = () => {
 
     const fetchAdminData = async () => {
       try {
-        const [statsRes, productsRes, ordersRes, supaStatus] = await Promise.allSettled([
+        const supaStatus = await checkSupabaseConnection();
+        setSupabaseConnected(supaStatus);
+
+        if (supaStatus) {
+          const supaStats = await getAdminStats();
+          if (supaStats.success) {
+            setStats(supaStats.data);
+            // We'd also need to fetch products and orders from Supabase here
+            const supaProds = await supabase.from('products').select('*').limit(5);
+            const supaOrders = await supabase.from('orders').select('*').limit(5);
+            if (!supaProds.error) setProducts(supaProds.data || []);
+            if (!supaOrders.error) setOrders(supaOrders.data || []);
+            setLoading(false);
+            return;
+          }
+        }
+
+        // Fallback to Local API
+        const [statsRes, productsRes, ordersRes] = await Promise.allSettled([
           fetch('/api/admin/stats', { headers: { 'Authorization': `Bearer ${token}` } }),
           fetch('/api/products'),
           fetch('/api/orders', { headers: { 'Authorization': `Bearer ${token}` } }),
-          checkSupabaseConnection()
         ]);
 
         const statsResult = statsRes.status === 'fulfilled' ? statsRes.value : null;
         const productsResult = productsRes.status === 'fulfilled' ? productsRes.value : null;
         const ordersResult = ordersRes.status === 'fulfilled' ? ordersRes.value : null;
-        const supaStatusResult = supaStatus.status === 'fulfilled' ? supaStatus.value : false;
-
-        setSupabaseConnected(supaStatusResult);
 
         if (statsResult && statsResult.ok) {
           setStats(await statsResult.json());

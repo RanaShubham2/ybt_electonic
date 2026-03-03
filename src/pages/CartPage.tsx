@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ShoppingCart, X } from 'lucide-react';
 import { toast } from 'react-hot-toast';
 import { useAuthStore, useCartStore } from '../store';
+import { createOrder } from '../lib/supabase';
 
 const CartPage = () => {
   const { items, removeItem, clearCart } = useCartStore();
@@ -18,6 +19,17 @@ const CartPage = () => {
     }
 
     try {
+      // Try Supabase first
+      const supaResult = await createOrder(String(user.id), total, items);
+      
+      if (supaResult.success) {
+        toast.success('Order placed successfully (Supabase)!');
+        clearCart();
+        navigate('/profile');
+        return;
+      }
+
+      // Fallback to local API
       const { token } = useAuthStore.getState();
       const response = await fetch('/api/orders', {
         method: 'POST',

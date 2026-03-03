@@ -117,6 +117,12 @@ const LoginPage = () => {
       }
 
       // Local API Fallback (only if Supabase is not connected or login failed)
+      const isProduction = import.meta.env.PROD;
+      if (isProduction && supabaseConnected) {
+        // In production, if Supabase is connected but auth failed, don't try local
+        throw new Error('Authentication failed. Please check your credentials.');
+      }
+
       console.log('Attempting Local Authentication...');
       const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
       const body = isLogin ? { email, password } : { name, email, password };

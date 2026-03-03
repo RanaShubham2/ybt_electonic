@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { toast } from 'react-hot-toast';
 import { useAuthStore, useCartStore, useWishlistStore } from '../store';
 import { cn } from '../lib/utils';
+import { getProductById } from '../lib/supabase';
 
 const optimizeImage = (url: string, width = 600, quality = 75) => {
   if (!url) return 'https://images.unsplash.com/photo-1560393464-5c69a73c5770?auto=format&fit=crop&w=600&q=75';
@@ -46,22 +47,30 @@ const ProductDetailPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const fetchProduct = async () => {
+    const fetchProductData = async () => {
       setLoading(true);
       try {
-        const response = await fetch(`/api/products/${id}`);
-        if (!response.ok) throw new Error('Product not found');
-        const data = await response.json();
-        setProduct(data);
-        setSelectedImage(data.image_url);
-      } catch (err) {
+        const result = await getProductById(id!);
+        if (result.success) {
+          setProduct(result.data);
+          setSelectedImage(result.data.image_url);
+        } else if (result.fallback) {
+          const response = await fetch(`/api/products/${id}`);
+          if (!response.ok) throw new Error('Product not found');
+          const data = await response.json();
+          setProduct(data);
+          setSelectedImage(data.image_url);
+        } else {
+          throw new Error(result.error);
+        }
+      } catch (err: any) {
         console.error('Error fetching product:', err);
         toast.error('Product not found');
       } finally {
         setLoading(false);
       }
     };
-    if (id) fetchProduct();
+    if (id) fetchProductData();
   }, [id]);
 
   const handleToggleWishlist = async () => {

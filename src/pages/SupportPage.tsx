@@ -25,6 +25,10 @@ const SupportPage = () => {
         return;
       }
 
+      if (supaResult.fallback === false) {
+        throw new Error(supaResult.error || 'Failed to send message');
+      }
+
       // Fallback to local API if Supabase is not configured or fails
       const response = await fetch('/api/support', {
         method: 'POST',
