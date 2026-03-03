@@ -5,8 +5,18 @@ import * as bcrypt from 'bcryptjs';
 import db from './src/db.ts';
 import dotenv from 'dotenv';
 import path from 'path';
+import Razorpay from 'razorpay';
+import crypto from 'crypto';
 
 dotenv.config();
+
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+
+const razorpay = RAZORPAY_KEY_ID && RAZORPAY_KEY_SECRET ? new Razorpay({
+  key_id: RAZORPAY_KEY_ID,
+  key_secret: RAZORPAY_KEY_SECRET,
+}) : null;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'ybt-digital-secret-key-2024';
 
@@ -250,6 +260,77 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
+    }
+  });
+
+  // --- Razorpay Payments ---
+  app.post('/api/payments/create-order', authenticateToken, async (req: any, res) => {
+    if (!razorpay) {
+      return res.status(500).json({ error: 'Razorpay is not configured on the server' });
+    }
+
+    const { amount, currency = 'INR' } = req.body;
+
+    try {
+      const options = {
+        amount: Math.round(amount * 100), // amount in the smallest currency unit (paise)
+        currency,
+        receipt: `receipt_${Date.now()}`,
+      };
+
+      const order = await razorpay.orders.create(options);
+      res.json(order);
+    } catch (error: any) {
+      console.error('Razorpay Order Creation Error:', error);
+      res.status(500).json({ error: 'Failed to create Razorpay order' });
+    }
+  });
+
+  app.post('/api/payments/verify', authenticateToken, async (req: any, res) => {
+    const { 
+      razorpay_order_id, 
+      razorpay_payment_id, 
+      razorpay_signature,
+      items,
+      totalAmount
+    } = req.body;
+
+    if (!RAZORPAY_KEY_SECRET) {
+      return res.status(500).json({ error: 'Razorpay secret is missing' });
+    }
+
+    const body = razorpay_order_id + "|" + razorpay_payment_id;
+    const expectedSignature = crypto
+      .createHmac('sha256', RAZORPAY_KEY_SECRET)
+      .update(body.toString())
+      .digest('hex');
+
+    if (expectedSignature === razorpay_signature) {
+      // Payment is verified
+      const userId = req.user.local_id || req.user.id;
+
+      const transaction = db.transaction(() => {
+        const result = db.prepare('INSERT INTO orders (user_id, total_amount, transaction_id, status) VALUES (?, ?, ?, ?)').run(
+          userId, totalAmount, razorpay_payment_id, 'completed'
+        );
+        const orderId = result.lastInsertRowid;
+
+        for (const item of items) {
+          db.prepare('INSERT INTO order_items (order_id, product_id, price) VALUES (?, ?, ?)').run(
+            orderId, item.id, item.price
+          );
+        }
+        return orderId;
+      });
+
+      try {
+        const orderId = transaction();
+        res.json({ success: true, orderId });
+      } catch (error: any) {
+        res.status(500).json({ error: 'Payment verified but failed to save order locally' });
+      }
+    } else {
+      res.status(400).json({ error: 'Invalid payment signature' });
     }
   });
 

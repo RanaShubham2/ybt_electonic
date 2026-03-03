@@ -18,36 +18,94 @@ const CartPage = () => {
       return;
     }
 
-    try {
-      // Try Supabase first
-      const supaResult = await createOrder(String(user.id), total, items);
-      
-      if (supaResult.success) {
-        toast.success('Order placed successfully!');
-        clearCart();
-        navigate('/profile');
+    const razorpayKeyId = import.meta.env.VITE_RAZORPAY_KEY_ID;
+    const { token } = useAuthStore.getState();
+
+    if (!razorpayKeyId) {
+      // Fallback to simulated checkout if Razorpay is not configured
+      console.warn('Razorpay Key ID is missing. Falling back to simulated checkout.');
+      try {
+        const supaResult = await createOrder(String(user.id), total, items);
+        if (supaResult.success) {
+          toast.success('Order placed successfully!');
+          clearCart();
+          navigate('/profile');
+          return;
+        }
+        throw new Error('Checkout failed');
+      } catch (err: any) {
+        toast.error(err.message || 'Checkout failed');
         return;
       }
+    }
 
-      // Fallback to local API
-      const { token } = useAuthStore.getState();
-      const response = await fetch('/api/orders', {
+    try {
+      // 1. Create order on server
+      const orderRes = await fetch('/api/payments/create-order', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({
-          items,
-          totalAmount: total
-        })
+        body: JSON.stringify({ amount: total })
       });
 
-      if (!response.ok) throw new Error('Checkout failed');
+      if (!orderRes.ok) throw new Error('Failed to create payment order');
+      const orderData = await orderRes.json();
 
-      toast.success('Order placed successfully!');
-      clearCart();
-      navigate('/profile');
+      // 2. Initialize Razorpay
+      const options = {
+        key: razorpayKeyId,
+        amount: orderData.amount,
+        currency: orderData.currency,
+        name: "YBT Electronics",
+        description: "Purchase from YBT Electronics",
+        order_id: orderData.id,
+        handler: async (response: any) => {
+          // 3. Verify payment on server
+          try {
+            const verifyRes = await fetch('/api/payments/verify', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                razorpay_order_id: response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                items,
+                totalAmount: total
+              })
+            });
+
+            if (!verifyRes.ok) throw new Error('Payment verification failed');
+            const verifyData = await verifyRes.json();
+
+            if (verifyData.success) {
+              toast.success('Payment successful and order placed!');
+              clearCart();
+              navigate('/profile');
+            }
+          } catch (err: any) {
+            toast.error('Payment verification failed. Please contact support.');
+          }
+        },
+        prefill: {
+          name: user.name,
+          email: user.email,
+        },
+        theme: {
+          color: "#10b981", // emerald-500
+        },
+      };
+
+      const rzp = new (window as any).Razorpay(options);
+      rzp.on('payment.failed', function (response: any) {
+        toast.error('Payment failed: ' + response.error.description);
+      });
+      rzp.open();
+
     } catch (err: any) {
       console.error('Checkout error:', err);
       toast.error(err.message || 'Checkout failed');
