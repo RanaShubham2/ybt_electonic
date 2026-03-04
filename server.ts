@@ -266,7 +266,10 @@ async function startServer() {
   // --- Razorpay Payments ---
   app.post('/api/payments/create-order', authenticateToken, async (req: any, res) => {
     if (!razorpay) {
-      return res.status(500).json({ error: 'Razorpay is not configured on the server' });
+      console.error('Razorpay initialization failed. Check RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET.');
+      return res.status(500).json({ 
+        error: 'Razorpay is not configured on the server. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in your environment variables.' 
+      });
     }
 
     const { amount, currency = 'INR' } = req.body;

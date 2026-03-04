@@ -50,8 +50,15 @@ const CartPage = () => {
         body: JSON.stringify({ amount: total })
       });
 
-      if (!orderRes.ok) throw new Error('Failed to create payment order');
+      if (orderRes.status === 404) {
+        throw new Error('Backend server not found. If you are on Netlify, please ensure your backend is deployed and reachable.');
+      }
+
       const orderData = await orderRes.json();
+
+      if (!orderRes.ok) {
+        throw new Error(orderData.error || 'Failed to create payment order');
+      }
 
       // 2. Initialize Razorpay
       const options = {
